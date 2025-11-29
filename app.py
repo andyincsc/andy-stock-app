@@ -81,6 +81,10 @@ STOCK_SECTORS = {
 if 'watchlist' not in st.session_state:
     st.session_state.watchlist = ['2330.TW', '2317.TW'] # 預設
 
+# 初始化搜尋結果暫存 (新增這個變數)
+if 'scan_results' not in st.session_state:
+    st.session_state.scan_results = None
+
 # 定義按鈕的回呼函數 (Callback)，這是修復按鈕無效的關鍵
 def add_to_watchlist(ticker):
     if ticker not in st.session_state.watchlist:
@@ -197,6 +201,7 @@ with tab1:
     
     target_stocks = STOCK_SECTORS[selected_sector]
     
+    # 修改：按鈕只負責「更新資料到記憶體」
     if st.button("🚀 開始分析", key="btn_scan"):
         with st.spinner(f"正在分析 {selected_sector}..."):
             df_result = analyze_stock_batch(target_stocks)
@@ -205,43 +210,51 @@ with tab1:
                 filtered_df = df_result[df_result['符合條件數'] >= 3].sort_values(
                     by=['符合條件數', '量比(倍)'], ascending=False
                 )
-                top_10 = filtered_df.head(10)
-                
-                st.success(f"掃描完成！找到 {len(top_10)} 檔潛力股 (顯示前 10 名)")
-                
-                # 調整欄位寬度以容納「名稱」
-                cols_header = st.columns([1.2, 1.2, 1, 1.2, 1, 1, 1, 1.5])
-                headers = ["代號", "名稱", "價格", "漲跌", "量比", "RSI", "條件數", "操作"]
-                for col, h in zip(cols_header, headers):
-                    col.markdown(f"**{h}**")
-                st.divider()
-
-                for index, row in top_10.iterrows():
-                    cols = st.columns([1.2, 1.2, 1, 1.2, 1, 1, 1, 1.5])
-                    
-                    color = "red" if row['漲跌幅(%)'] > 0 else "green"
-                    
-                    cols[0].write(row['代號'])
-                    cols[1].write(row['名稱']) # 顯示名稱
-                    cols[2].write(f"{row['價格']}")
-                    cols[3].markdown(f":{color}[{row['漲跌幅(%)']}%]")
-                    cols[4].write(f"{row['量比(倍)']}x")
-                    cols[5].write(f"{row['RSI']}")
-                    cols[6].write(f"⭐ {row['符合條件數']}")
-                    
-                    # 按鈕修復：使用 on_click 回呼函數
-                    if row['代號'] in st.session_state.watchlist:
-                        cols[7].write("✅ 已加入")
-                    else:
-                        # 這裡的重點是 on_click=add_to_watchlist
-                        cols[7].button(
-                            "➕ 加入", 
-                            key=f"add_{row['代號']}", 
-                            on_click=add_to_watchlist, 
-                            args=(row['代號'],)
-                        )
+                # 將結果存入 session_state
+                st.session_state.scan_results = filtered_df.head(10)
             else:
-                st.warning("無法取得資料，請稍後再試。")
+                st.session_state.scan_results = pd.DataFrame()
+
+    # 修改：顯示邏輯改為「只要記憶體有資料就顯示」，不依賴按鈕狀態
+    if st.session_state.scan_results is not None:
+        if not st.session_state.scan_results.empty:
+            top_10 = st.session_state.scan_results
+            
+            st.success(f"掃描完成！找到 {len(top_10)} 檔潛力股 (顯示前 10 名)")
+            
+            # 調整欄位寬度以容納「名稱」
+            cols_header = st.columns([1.2, 1.2, 1, 1.2, 1, 1, 1, 1.5])
+            headers = ["代號", "名稱", "價格", "漲跌", "量比", "RSI", "條件數", "操作"]
+            for col, h in zip(cols_header, headers):
+                col.markdown(f"**{h}**")
+            st.divider()
+
+            for index, row in top_10.iterrows():
+                cols = st.columns([1.2, 1.2, 1, 1.2, 1, 1, 1, 1.5])
+                
+                color = "red" if row['漲跌幅(%)'] > 0 else "green"
+                
+                cols[0].write(row['代號'])
+                cols[1].write(row['名稱']) # 顯示名稱
+                cols[2].write(f"{row['價格']}")
+                cols[3].markdown(f":{color}[{row['漲跌幅(%)']}%]")
+                cols[4].write(f"{row['量比(倍)']}x")
+                cols[5].write(f"{row['RSI']}")
+                cols[6].write(f"⭐ {row['符合條件數']}")
+                
+                # 按鈕修復：使用 on_click 回呼函數
+                if row['代號'] in st.session_state.watchlist:
+                    cols[7].write("✅ 已加入")
+                else:
+                    # 這裡的重點是 on_click=add_to_watchlist
+                    cols[7].button(
+                        "➕ 加入", 
+                        key=f"add_{row['代號']}", 
+                        on_click=add_to_watchlist, 
+                        args=(row['代號'],)
+                    )
+        else:
+            st.warning("無法取得資料，請稍後再試。")
 
 # ==========================================
 # 分頁 2: 自選股管理
