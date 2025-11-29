@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt # 新增繪圖套件
 
 # --- 頁面設定 ---
 st.set_page_config(page_title="台股分批智慧掃描", layout="wide")
@@ -85,6 +86,10 @@ if 'watchlist' not in st.session_state:
 if 'scan_results' not in st.session_state:
     st.session_state.scan_results = None
 
+# 初始化選中的圖表股票
+if 'selected_chart_stock' not in st.session_state:
+    st.session_state.selected_chart_stock = None
+
 # 定義按鈕的回呼函數 (Callback)，這是修復按鈕無效的關鍵
 def add_to_watchlist(ticker):
     if ticker not in st.session_state.watchlist:
@@ -95,6 +100,8 @@ def add_to_watchlist(ticker):
 def remove_from_watchlist(ticker):
     if ticker in st.session_state.watchlist:
         st.session_state.watchlist.remove(ticker)
+        if st.session_state.selected_chart_stock == ticker:
+            st.session_state.selected_chart_stock = None
         st.toast(f"🗑️ 已移除 {get_stock_name(ticker)}")
 
 def add_manual_stock():
@@ -109,7 +116,10 @@ def add_manual_stock():
     # 清空輸入框
     st.session_state.new_ticker_input = ""
 
-# --- 4. 核心運算函數 ---
+def set_chart_stock(ticker):
+    st.session_state.selected_chart_stock = ticker
+
+# --- 4. 核心運算與繪圖函數 ---
 @st.cache_data(ttl=300)
 def analyze_stock_batch(ticker_list):
     results = []
@@ -184,6 +194,40 @@ def analyze_stock_batch(ticker_list):
             continue
             
     return pd.DataFrame(results)
+
+# 繪製個股走勢圖函式
+def plot_stock_chart(ticker):
+    try:
+        # 抓取 1 年的資料
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1y")
+        
+        if df.empty:
+            st.warning("無法取得歷史股價資料")
+            return
+
+        # 計算均線
+        df['5MA'] = df['Close'].rolling(window=5).mean()
+        df['20MA'] = df['Close'].rolling(window=20).mean()
+        df['60MA'] = df['Close'].rolling(window=60).mean()
+        
+        # 繪圖
+        fig, ax = plt.subplots(figsize=(12, 6))
+        ax.plot(df.index, df['Close'], label='收盤價', color='gray', alpha=0.5, linewidth=2)
+        ax.plot(df.index, df['5MA'], label='週線 (5MA)', color='orange', linewidth=1.5)
+        ax.plot(df.index, df['20MA'], label='月線 (20MA)', color='red', linewidth=1.5)
+        ax.plot(df.index, df['60MA'], label='季線 (60MA)', color='green', linewidth=1.5)
+        
+        ax.set_title(f"{get_stock_name(ticker)} ({ticker}) 近一年走勢", fontsize=16)
+        ax.set_xlabel("日期")
+        ax.set_ylabel("價格")
+        ax.legend(loc='upper left')
+        ax.grid(True, alpha=0.3)
+        
+        st.pyplot(fig)
+        
+    except Exception as e:
+        st.error(f"繪圖發生錯誤: {e}")
 
 # --- 5. 介面佈局 ---
 tab1, tab2 = st.tabs(["🔍 類股分批篩選", "📋 我的自選股"])
@@ -285,6 +329,36 @@ with tab2:
                     use_container_width=True
                 )
                 
+                st.divider()
+                
+                # --- 新增區塊：個股走勢圖互動區 ---
+                st.markdown("#### 📈 點擊股票名稱查看走勢圖")
+                
+                # 建立按鈕列表 (每行 5 個按鈕)
+                cols_btn = st.columns(5)
+                for i, ticker in enumerate(st.session_state.watchlist):
+                    btn_col = cols_btn[i % 5]
+                    # 如果按鈕被點擊，會觸發 set_chart_stock 函式
+                    # 我們利用 button 的顏色來區分目前選中的股票 (需 Streamlit 新版支援，這裡用簡單文字區分)
+                    label = f"{get_stock_name(ticker)}"
+                    if st.session_state.selected_chart_stock == ticker:
+                        label = f"🔴 {label}" # 用紅點標示選中
+                        
+                    btn_col.button(
+                        label, 
+                        key=f"chart_btn_{ticker}", 
+                        on_click=set_chart_stock, 
+                        args=(ticker,),
+                        use_container_width=True
+                    )
+                
+                # 如果有選中股票，則顯示圖表
+                if st.session_state.selected_chart_stock:
+                    st.markdown(f"---")
+                    with st.spinner(f"正在繪製 {get_stock_name(st.session_state.selected_chart_stock)} 走勢圖..."):
+                        plot_stock_chart(st.session_state.selected_chart_stock)
+
+                st.markdown("---")
                 st.markdown("#### 🗑️ 移除股票")
                 # 這裡使用列出按鈕的方式來刪除，比較直覺
                 st.write("點擊下方按鈕移除股票：")
